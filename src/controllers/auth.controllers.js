@@ -1,0 +1,11 @@
+import { asyncHandler } from "../utils/asyn_handler.js"
+
+const registerUser=asyncHandler(async(req,res)=>{
+    const {email,username,password,role}=req.body
+
+    //validation
+
+    registrationValidation(body)
+
+})
+export {registerUser}
