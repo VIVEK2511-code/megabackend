@@ -1,7 +1,7 @@
 import {body} from "express-validator"
 
 const userRegistrationValidator=()=>{
-
+    
     return [
         body('email')
         .trim()
@@ -16,14 +16,14 @@ const userRegistrationValidator=()=>{
     ]
 }
 
-const userLoginValidator=()=>{
+export const userLoginValidator=()=>{
     return [
         body("email").isEmail.withMessage("Email is not valid"),
         body("password").notEmpty().withMessage("password cannot be empty"),
     ];
 }
 
-export {userRegistrationValidator}
+// export {userRegistrationValidator}
 
 
 
