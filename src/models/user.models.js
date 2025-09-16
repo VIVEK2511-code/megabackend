@@ -1,5 +1,4 @@
 import mongoose ,{Schema} from "mongoose";
-
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken"
 import crypto from "crypto"
@@ -45,7 +44,7 @@ const userSchema=new Schema({
     forgotPasswordToken:{
        type:string,
     },
-     forgotPasswordToken:{
+     forgotPasswordExpiry:{
        type:Date,
     
     },
@@ -56,7 +55,7 @@ const userSchema=new Schema({
        type:string,
     },
     emailVerificationExpiry:{
-       type:Date,
+       type:Date, 
     }
 
 },{timestamps:true})
@@ -75,7 +74,7 @@ userSchema.methods.isPasswordCorrect=async function(password){
     return await bcrypt.compare(password,this.password)
 }
 
-userSchema.methods.genertateAccessToken=function(){
+userSchema.methods.generateAccessToken=function(){
     return jwt.sign(
         {
             _id:this._id,
@@ -85,8 +84,18 @@ userSchema.methods.genertateAccessToken=function(){
     process.env.ACCESS_TOKEN_SECRET,
     {expiresIn:process.env.ACCESS_TOKEN_EXPIRY}
 );
-};
-
+}; 
+userSchema.methods.generateRefreshToken=function(){
+    return jwt.sign(
+        {
+            _id:this._id,
+            email:this.email,
+            username:this.username
+        },
+        process.env.REFRESH_TOKEN_SECRET,
+        {expiresIn:process.env.REFRESH_TOKEN_EXPIRY}
+    )
+}
 userSchema.methods.generateTemporaryToken=function(){
     const unHashedToken=crypto.randomBytes(20).toString("hex")
 
