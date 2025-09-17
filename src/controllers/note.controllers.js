@@ -85,9 +85,6 @@ export const createNote=asyncHandler(async(req,res)=>{
     return res.status(200).json(new ApiResponse(200,note,"Note fetched successfully"))
   })
   
-
-
-
 export const updateNote = asyncHandler(async (req, res) => {
     const { noteId } = req.params;   // only noteId from URL
     const { content } = req.body;    // new note content
@@ -126,4 +123,64 @@ export const updateNote = asyncHandler(async (req, res) => {
     return res
         .status(200)
         .json(new ApiResponse(200, updatedNote, "Note updated successfully"));
+});
+
+
+export const deleteNote=asyncHandler(async(req,res)=>{
+  const {noteId,memerId}=req.params;
+  if(!noteId){
+    throw new ApiError(400,"Note id is required")
+  }
+  
+  const deleteNote=await ProjectNote.findOneAndDelete(
+    {
+    _id:noteId,
+    createdBy:memberId,
+    }
+  );
+  if(!deleteNote){
+    throw new ApiError(404,"Note not found or you are not authorized to delete this note")
+  };
+  return res.status(200).json(new ApiResponse(200,deleteNote,"Note deleted successfully"))
+});
+
+export const getNotesofMember=asyncHandler(async(req,res)=>{
+
+         const userId = req.user?._id;
+         // get all member ids of the user in all projects
+         const projectMembers = await ProjectMember.find({ user: userId })
+        .select("_id project")
+        .lean();
+
+        //projectMembers is the array we got from:
+        //If this user doesn’t belong to any project, the array will be empty [].
+       // projectMembers?.length === 0
+      // ?. is optional chaining (safely checks length only if projectMembers is not null or undefined).
+     // If there are no project memberships, this condition is true.
+         if (projectMembers?.length === 0) {
+        return res
+            .status(200)
+            .json(new ApiResponse(200, [], "No projects found for this user"));
+    }
+     // get all member ids
+    const projectMemberIds = projectMembers.map((member) => member._id);
+    
+    // find all notes created by these member ids
+     const notes = await ProjectNote.find({
+        createdBy: { $in: projectMemberIds },
+    })
+        .select("-__v")
+        .populate("project", "name description ")
+        .populate({
+            path: "createdBy",
+            select: "user",
+            populate: {
+                path: "user",
+                select: "_id name email username avatar",
+            },
+        })
+        .lean();
+            return res
+        .status(200)
+        .json(new ApiResponse(200, notes, "Notes fetched successfully"));
 });
