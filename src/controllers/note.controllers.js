@@ -87,3 +87,43 @@ export const createNote=asyncHandler(async(req,res)=>{
   
 
 
+
+export const updateNote = asyncHandler(async (req, res) => {
+    const { noteId } = req.params;   // only noteId from URL
+    const { content } = req.body;    // new note content
+
+    // 1. Validate inputs
+    if (!noteId) {
+        throw new ApiError(400, "Note ID is required");
+    }
+    if (!content || content.trim() === "") {
+        throw new ApiError(400, "Content is required");
+    }
+
+    // 2. Find the note
+    const existingNote = await ProjectNote.findById(noteId);
+    if (!existingNote) {
+        throw new ApiError(404, "Note not found");
+    }
+
+    // 3. Check if the logged-in user is the author of this note
+    if (existingNote.createdBy.toString() !== req.user._id.toString()) {
+        throw new ApiError(403, "You are not authorized to update this note");
+    }
+
+    // 4. Update note content
+    existingNote.content = content.trim();
+    await existingNote.save();
+
+    // 5. Populate updated note for response
+    const updatedNote = await ProjectNote.findById(noteId)
+        .select("-__v")
+        .populate("project", "name")
+        .populate("createdBy", "_id name email username avatar")
+        .lean();
+
+    // 6. Return response
+    return res
+        .status(200)
+        .json(new ApiResponse(200, updatedNote, "Note updated successfully"));
+});
