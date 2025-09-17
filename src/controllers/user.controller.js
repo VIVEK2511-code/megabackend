@@ -8,6 +8,23 @@ import {
     uploadOnCloudinary,
 } from "../utils/fileUpload.cloudinary.js";
 
+// getUserById Controller – Short Notes
+// Purpose: Fetch a user’s public profile details by their userId (MongoDB _id).
+// Input:
+// req.params.userId → user’s unique ID (ObjectId).
+// Process:
+// Validate userId is provided.
+// Query MongoDB: User.findById(userId).
+// Use .select() to exclude sensitive fields (password, refreshToken, tokens, etc.).
+// If user not found → throw 404.
+// If found → return user details.
+// Output:
+// 200 OK → user object (public fields only).
+// 400 → if userId missing.
+// 404 → if no user exists with that ID.
+// Security: Prevents exposing sensitive fields, only returns safe data.
+// MongoDB behavior: _id is auto-generated; route param :userId matches this _id.
+
 const getUserById = asyncHandler(async (req, res) => {
     const { userId } = req.params;
 
