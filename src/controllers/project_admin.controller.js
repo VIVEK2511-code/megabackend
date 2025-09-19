@@ -63,7 +63,7 @@ export const getProjectsSummary = asyncHandler(async (req, res) => {
     );
 });
 
-  export const getProjectDetails = asyncHandler(async (req, res) => {
+export const getProjectDetails = asyncHandler(async (req, res) => {
     const userId = req.user._id;
 
     // Get projects where user is an admin or project manager
@@ -269,6 +269,301 @@ export const getTasksOverview = asyncHandler(async (req, res) => {
                 tasksByPriority,
             },
             "Tasks overview fetched successfully",
+        ),
+    );
+});
+ export const getContentMetrics = asyncHandler(async (req, res) => {
+    const userId = req.user._id;
+
+    // Get projects where user is an admin
+    const adminProjects = await ProjectMember.find({
+        user: userId,
+        role: { $in: UserRolesEnum.ADMIN },
+    });
+
+    const projectIds = adminProjects.map((member) => member.project);
+
+    // Notes stats
+    const notesPerProject = await ProjectNote.aggregate([
+        { $match: { project: { $in: projectIds } } },
+        {
+            $group: {
+                _id: "$project",
+                count: { $sum: 1 },
+            },
+        },
+        {
+            $lookup: {
+                from: "projects",
+                localField: "_id",
+                foreignField: "_id",
+                as: "projectInfo",
+            },
+        },
+        {
+            $unwind: "$projectInfo",
+        },
+        {
+            $project: {
+                _id: 1,
+                count: 1,
+                projectName: "$projectInfo.name",
+            },
+        },
+    ]);
+
+    // Recent notes
+    const recentNotes = await ProjectNote.find({
+        project: { $in: projectIds },
+    })
+        .sort({ createdAt: -1 })
+        .limit(5)
+        .populate("project", "name")
+        .populate("createdBy", "name username avatar");
+
+    // Task attachments
+    const tasks = await Task.find({
+        project: { $in: projectIds },
+        "attachments.0": { $exists: true },
+    });
+
+    // Calculate total attachments
+    const totalAttachments = tasks.reduce((sum, task) => {
+        return sum + task.attachments.length;
+    }, 0);
+
+    // Calculate attachments by file type
+    const attachmentTypes = {};
+    tasks.forEach((task) => {
+        task.attachments.forEach((attachment) => {
+            const fileType = attachment.url.split(".").pop().toLowerCase();
+            attachmentTypes[fileType] = (attachmentTypes[fileType] || 0) + 1;
+        });
+    });
+
+    return res.status(200).json(
+        new ApiResponse(
+            200,
+            {
+                notesPerProject,
+                recentNotes,
+                totalAttachments,
+                attachmentTypes,
+            },
+            "Content metrics fetched successfully",
+        ),
+    );
+});
+export const getActivityFeed = asyncHandler(async (req, res) => {
+    const userId = req.user._id;
+
+    // Get projects where user is an admin
+    const adminProjects = await ProjectMember.find({
+        user: userId,
+        role: { $in: UserRolesEnum.ADMIN },
+    });
+
+    const projectIds = adminProjects.map((member) => member.project);
+
+    // Get recent tasks (created/updated)
+    const recentTasks = await Task.find({
+        project: { $in: projectIds },
+    })
+        .sort({ updatedAt: -1 })
+        .limit(10)
+        .populate("project", "name")
+        .populate({
+            path: "assignedTo", // First, populate the ProjectMember document
+            select: "user", // Select only the 'user' field from ProjectMember
+            populate: {
+                path: "user", // Then, populate the actual User document linked by 'user'
+                select: "_id name email username avatar", // Select desired fields from the User
+            },
+        })
+        .populate({
+            path: "assignedBy", // First, populate the ProjectMember document
+            select: "user", // Select only the 'user' field from ProjectMember
+            populate: {
+                path: "user", // Then, populate the actual User document linked by 'user'
+                select: "_id name email username avatar", // Select desired fields from the User
+            },
+        });
+
+    // Get recent project members
+    const recentMembers = await ProjectMember.find({
+        project: { $in: projectIds },
+    })
+        .sort({ createdAt: -1 })
+        .limit(10)
+        .populate("user", "name email username avatar")
+        .populate("project", "name");
+
+    // Get recent notes
+    const recentNotes = await ProjectNote.find({
+        project: { $in: projectIds },
+    })
+        .sort({ createdAt: -1 })
+        .limit(10)
+        .populate("project", "name")
+        .populate("createdBy", "name username avatar");
+
+    // Combine and sort all activities by date
+    const activities = [
+        ...recentTasks.map((task) => ({
+            type: "task",
+            data: task,
+            date: task.updatedAt,
+        })),
+        ...recentMembers.map((member) => ({
+            type: "member",
+            data: member,
+            date: member.createdAt,
+        })),
+        ...recentNotes.map((note) => ({
+            type: "note",
+            data: note,
+            date: note.createdAt,
+        })),
+    ]
+        .sort((a, b) => b.date - a.date)
+        .slice(0, 20);
+
+    return res
+        .status(200)
+        .json(
+            new ApiResponse(
+                200,
+                activities,
+                "Activity feed fetched successfully",
+            ),
+        );
+});
+const getUserManagementStats = asyncHandler(async (req, res) => {
+    // Ensure user is a system admin
+    if (req.user.role !== "admin") {
+        throw new ApiError(
+            403,
+            "You are not authorized to access user management stats",
+        );
+    }
+
+    // Total users
+    const totalUsers = await User.countDocuments();
+
+    // Users by verification status
+    const verifiedUsers = await User.countDocuments({ isEmailVerified: true });
+    const unverifiedUsers = totalUsers - verifiedUsers;
+
+    // Recent registrations
+    const recentUsers = await User.find()
+        .sort({ createdAt: -1 })
+        .limit(10)
+        .select("name username email isEmailVerified createdAt");
+
+    // Registration trend (last 7 days)
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+    const registrationTrend = await User.aggregate([
+        {
+            $match: {
+                createdAt: { $gte: sevenDaysAgo },
+            },
+        },
+        {
+            $group: {
+                _id: {
+                    $dateToString: { format: "%Y-%m-%d", date: "$createdAt" },
+                },
+                count: { $sum: 1 },
+            },
+        },
+        { $sort: { _id: 1 } },
+    ]);
+
+    return res.status(200).json(
+        new ApiResponse(
+            200,
+            {
+                totalUsers,
+                verificationStats: {
+                    verified: verifiedUsers,
+                    unverified: unverifiedUsers,
+                    verificationRate: Math.round(
+                        (verifiedUsers / totalUsers) * 100,
+                    ),
+                },
+                recentUsers,
+                registrationTrend,
+            },
+            "User management stats fetched successfully",
+        ),
+    );
+});
+export  const getTaskTimeline = asyncHandler(async (req, res) => {
+    const userId = req.user._id;
+
+    // Get projects where user is an admin
+    const adminProjects = await ProjectMember.find({
+        user: userId,
+        role: { $in: UserRolesEnum.ADMIN },
+    });
+
+    const projectIds = adminProjects.map((member) => member.project);
+
+    // Recently created tasks
+    const recentTasks = await Task.find({
+        project: { $in: projectIds },
+    })
+        .sort({ createdAt: -1 })
+        .limit(5)
+        .populate("project", "name")
+        .populate("assignedTo", "name username avatar")
+        .populate("assignedBy", "name username avatar");
+
+    // Recently completed tasks
+    const recentlyCompletedTasks = await Task.find({
+        project: { $in: projectIds },
+        status: TaskStatusEnum.DONE,
+    })
+        .sort({ updatedAt: -1 })
+        .limit(5)
+        .populate("project", "name")
+        .populate("assignedTo", "name username avatar")
+        .populate("assignedBy", "name username avatar");
+
+    // Task completion trend (last 7 days)
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+    const completionTrend = await Task.aggregate([
+        {
+            $match: {
+                project: { $in: projectIds },
+                status: TaskStatusEnum.DONE,
+                updatedAt: { $gte: sevenDaysAgo },
+            },
+        },
+        {
+            $group: {
+                _id: {
+                    $dateToString: { format: "%Y-%m-%d", date: "$updatedAt" },
+                },
+                count: { $sum: 1 },
+            },
+        },
+        { $sort: { _id: 1 } },
+    ]);
+
+    return res.status(200).json(
+        new ApiResponse(
+            200,
+            {
+                recentTasks,
+                recentlyCompletedTasks,
+                completionTrend,
+            },
+            "Task timeline fetched successfully",
         ),
     );
 });
